@@ -122,7 +122,9 @@ The rule configuration files are used to configure what Elasticsearch queries wi
         "webhook": "https://slack.webhooks.foo/asdf",
         "channel": "#error-alerts",
         "text": "New errors",
-        "emoji": ":hankey:"
+        "emoji": ":hankey:",
+        "body_template": "```{{ range .1.buckets }}{{ range .2.buckets }}{{ range .3.buckets }}{{ println .key }}{{ end }}{{ end }}{{ end }}```",
+        "filter_template": "{{ if eq . \"aggregations.1.buckets.2.buckets.3.buckets\" }}More Friendly Name{{ end }}"
       }
     },
     {

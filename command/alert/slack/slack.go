@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"text/template"
 	"time"
 
 	cleanhttp "github.com/hashicorp/go-cleanhttp"
@@ -34,26 +36,30 @@ var _ alert.Method = (*AlertMethod)(nil)
 // AlertMethodConfig configures where Slack alerts should be
 // created and what they should look like.
 type AlertMethodConfig struct {
-	WebhookURL  string `mapstructure:"webhook"`
-	Channel     string `mapstructure:"channel"`
-	Username    string `mapstructure:"username"`
-	Text        string `mapstructure:"text"`
-	Emoji       string `mapstructure:"emoji"`
-	TextLimit   int    `mapstructure:"text_limit"`
-	IncludeData bool   `mapstructure:"include_data"`
-	Client      *http.Client
+	WebhookURL     string `mapstructure:"webhook"`
+	Channel        string `mapstructure:"channel"`
+	Username       string `mapstructure:"username"`
+	Text           string `mapstructure:"text"`
+	Emoji          string `mapstructure:"emoji"`
+	TextLimit      int    `mapstructure:"text_limit"`
+	IncludeData    bool   `mapstructure:"include_data"`
+	Client         *http.Client
+	BodyTemplate   string `mapstructure:"body_template"`
+	FilterTemplate string `mapstructure:"filter_template"`
 }
 
 // AlertMethod implements the alert.AlertMethod interface
 // for writing new alerts to Slack.
 type AlertMethod struct {
-	webhookURL string
-	client     *http.Client
-	channel    string
-	username   string
-	text       string
-	emoji      string
-	textLimit  int
+	webhookURL     string
+	client         *http.Client
+	channel        string
+	username       string
+	text           string
+	emoji          string
+	textLimit      int
+	bodyTemplate   *template.Template
+	filterTemplate *template.Template
 }
 
 // payload represents the JSON data needed to create a
@@ -64,6 +70,11 @@ type payload struct {
 	Text        string       `json:"text,omitempty"`
 	Emoji       string       `json:"icon_emoji,omitempty"`
 	Attachments []attachment `json:"attachments,omitempty"`
+}
+
+func toJSON(obj interface{}) string {
+	b, _ := json.MarshalIndent(obj, "", "  ")
+	return string(b)
 }
 
 // NewAlertMethod creates a new *AlertMethod or a
@@ -85,13 +96,19 @@ func NewAlertMethod(config *AlertMethodConfig) (alert.Method, error) {
 		config.TextLimit = defaultTextLimit
 	}
 
+	funcMap := template.FuncMap{
+		"toJSON": toJSON,
+	}
+
 	return &AlertMethod{
-		channel:    config.Channel,
-		webhookURL: config.WebhookURL,
-		client:     config.Client,
-		text:       config.Text,
-		emoji:      config.Emoji,
-		textLimit:  config.TextLimit,
+		channel:        config.Channel,
+		webhookURL:     config.WebhookURL,
+		client:         config.Client,
+		text:           config.Text,
+		emoji:          config.Emoji,
+		textLimit:      config.TextLimit,
+		bodyTemplate:   template.Must(template.New("body").Funcs(funcMap).Parse(config.BodyTemplate)),
+		filterTemplate: template.Must(template.New("filter").Parse(config.FilterTemplate)),
 	}, nil
 }
 
@@ -103,14 +120,40 @@ func (s *AlertMethod) Write(ctx context.Context, rule string, records []*alert.R
 	if records == nil || len(records) < 1 {
 		return nil
 	}
-	return s.post(ctx, s.buildPayload(rule, records))
+	pl, err := s.buildPayload(rule, records)
+	if err != nil {
+		return err
+	}
+	return s.post(ctx, pl)
+}
+
+func (s *AlertMethod) formatBody(jsonText string) (string, error) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonText), &obj); err != nil {
+		return "```\n" + jsonText + "\n```", xerrors.Errorf("failed to parse body as JSON: %s", err)
+	}
+	str := new(strings.Builder)
+	err := s.bodyTemplate.Execute(str, obj)
+	if err != nil {
+		return "```\n" + jsonText + "\n```", xerrors.Errorf("failed to execute body template: %s", err)
+	}
+	return str.String(), nil
+}
+
+func (s *AlertMethod) formatFilter(text string) (string, error) {
+	str := new(strings.Builder)
+	err := s.filterTemplate.Execute(str, text)
+	if err != nil {
+		return text, xerrors.Errorf("failed to execute filter template: %s", err)
+	}
+	return str.String(), nil
 }
 
 // buildPayload creates a *Payload instance from the provided
 // records. After being JSON-encoded it can be included in a
 // POST request to a Slack webhook in order to create a new
 // Slack message.
-func (s *AlertMethod) buildPayload(rule string, records []*alert.Record) payload {
+func (s *AlertMethod) buildPayload(rule string, records []*alert.Record) (payload, error) {
 	pl := payload{
 		Channel:  s.channel,
 		Username: s.username,
@@ -121,19 +164,27 @@ func (s *AlertMethod) buildPayload(rule string, records []*alert.Record) payload
 	records = s.preprocess(records)
 
 	for _, record := range records {
+		filterText, err := s.formatFilter(record.Filter)
+		if err != nil {
+			return pl, err
+		}
+
 		att := attachment{
 			Title:      rule,
-			Text:       record.Filter,
+			Text:       filterText,
 			MarkdownIn: []string{"text"},
 			Color:      defaultAttachmentColor,
 			Footer:     defaultAttachmentFooter,
-			FooterIcon: defaultAttachmentFooterIcon,
 			Timestamp:  time.Now().Unix(),
 		}
 
 		if record.BodyField && record.Text != "" {
-			att.Text = att.Text + "\n```\n" + record.Text + "\n```"
-			att.Color = "#ff0000"
+			bodyText, err := s.formatBody(record.Text)
+			if err != nil {
+				return pl, err
+			}
+			att.Text = att.Text + "\n" + bodyText
+			att.Color = defaultBodyColor
 		}
 
 		for _, f := range record.Fields {
@@ -152,7 +203,7 @@ func (s *AlertMethod) buildPayload(rule string, records []*alert.Record) payload
 		pl.Attachments = append(pl.Attachments, att)
 	}
 
-	return pl
+	return pl, nil
 }
 
 func (s *AlertMethod) post(ctx context.Context, pl payload) error {

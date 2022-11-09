@@ -14,9 +14,10 @@
 package slack
 
 const (
-	defaultAttachmentColor      = "#36a64f"
-	defaultAttachmentFooter     = "Go Elasticsearch Alerts"
-	defaultAttachmentFooterIcon = "https://www.elastic.co/static/images/elastic-logo-200.png"
+	defaultAttachmentColor  = "#36a64f"
+	defaultBodyColor        = "#287d3b"
+	defaultAttachmentFooter = "Go Elasticsearch Alerts"
+	// defaultAttachmentFooterIcon = "https://www.elastic.co/static/images/elastic-logo-200.png"  // broken link
 )
 
 // field corresponds to the 'attachment.field'
