@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+	"os"
+	"strconv"
 
 	hclog "github.com/hashicorp/go-hclog"
 )
@@ -135,6 +137,23 @@ func (a *Handler) Run(ctx context.Context, outputCh <-chan *Alert) { // nolint: 
 
 	a.logger.Info("Starting alert handler")
 
+	// suppress repeated alerts
+	suppressSecEnv := os.Getenv("SUPPRESS_SECONDS")
+	suppressCntEnv := os.Getenv("SUPPRESS_COUNT")
+
+	alertAge := 0
+	maxAlerts := 1
+
+	if s, err := strconv.Atoi(suppressSecEnv); err == nil {
+		alertAge = s
+	}
+
+	if s, err := strconv.Atoi(suppressCntEnv); err == nil {
+		maxAlerts = s
+	}
+
+	alertSuppressor := NewTTLMap(10, alertAge)
+
 	alertCh := make(chan func() (int, error), 8)
 	active := newInventory()
 
@@ -158,10 +177,16 @@ func (a *Handler) Run(ctx context.Context, outputCh <-chan *Alert) { // nolint: 
 			return
 		case alert := <-outputCh:
 			a.logger.Info(fmt.Sprintf("new query results received from rule %q", alert.RuleName))
-			for i, method := range alert.Methods {
-				alertMethodID := fmt.Sprintf("%d|%s", i, alert.ID)
-				active.register(alertMethodID)
-				alertCh <- alertFunc(ctx, alertMethodID, alert.RuleName, method, alert.Records)
+			alertCount := alertSuppressor.Get(alert.RuleName) + 1
+			alertSuppressor.Put(alert.RuleName, alertCount)
+			if alertCount <= maxAlerts {
+				for i, method := range alert.Methods {
+					alertMethodID := fmt.Sprintf("%d|%s", i, alert.ID)
+					active.register(alertMethodID)
+					alertCh <- alertFunc(ctx, alertMethodID, alert.RuleName, method, alert.Records)
+				}
+			} else {
+				a.logger.Info(fmt.Sprintf("Suppressing alerts for rule %q (count %d)", alert.RuleName, alertCount))
 			}
 		case writeAlert := <-alertCh:
 			select {

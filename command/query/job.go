@@ -306,6 +306,7 @@ func (q *QueryHandler) Run( // nolint: gocyclo, funlen, gocognit
 	}
 
 	for {
+		q.logger.Info(fmt.Sprintf("[Rule: %q] Waiting to run next query", q.name))
 		hits := []map[string]interface{}{}
 		select {
 		case <-ctx.Done():
@@ -313,6 +314,7 @@ func (q *QueryHandler) Run( // nolint: gocyclo, funlen, gocognit
 		case <-q.StopCh:
 			return
 		case <-time.After(next.Sub(now)):
+			q.logger.Info(fmt.Sprintf("[Rule: %q] querying Elasticsearch", q.name))
 			if distLock.Acquired() {
 				data, err := q.query(ctx)
 				if err != nil {

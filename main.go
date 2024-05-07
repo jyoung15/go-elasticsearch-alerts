@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 
+	hclog "github.com/hashicorp/go-hclog"
 	cmd "github.com/morningconsult/go-elasticsearch-alerts/command"
 	"github.com/morningconsult/go-elasticsearch-alerts/version"
 )
@@ -35,5 +36,6 @@ func main() {
 		os.Exit(0)
 	}
 
+	hclog.DefaultLevel = hclog.Debug
 	os.Exit(cmd.Run())
 }
