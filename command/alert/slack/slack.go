@@ -97,7 +97,18 @@ func NewAlertMethod(config *AlertMethodConfig) (alert.Method, error) {
 	}
 
 	funcMap := template.FuncMap{
-		"toJSON": toJSON,
+		"toJSON":     toJSON,
+		"contains":   strings.Contains,
+		"hasPrefix":  strings.HasPrefix,
+		"hasSuffix":  strings.HasSuffix,
+		"equalFold":  strings.EqualFold,
+		"join":       strings.Join,
+		"trimPrefix": strings.TrimPrefix,
+		"trimSuffix": strings.TrimSuffix,
+		"trimSpace":  strings.TrimSpace,
+		"toUpper":    strings.ToUpper,
+		"toLower":    strings.ToLower,
+		"toTitle":    strings.ToTitle,
 	}
 
 	return &AlertMethod{
@@ -130,7 +141,7 @@ func (s *AlertMethod) Write(ctx context.Context, rule string, records []*alert.R
 func (s *AlertMethod) formatBody(jsonText string) (string, error) {
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonText), &obj); err != nil {
-		return "```\n" + jsonText + "\n```", xerrors.Errorf("failed to parse body as JSON: %s", err)
+		return "```\n" + jsonText + "\n```", xerrors.Errorf("failed to parse body as JSON: %s %#v", err, jsonText)
 	}
 	str := new(strings.Builder)
 	err := s.bodyTemplate.Execute(str, obj)
