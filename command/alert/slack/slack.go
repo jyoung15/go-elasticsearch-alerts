@@ -25,6 +25,8 @@ import (
 
 	cleanhttp "github.com/hashicorp/go-cleanhttp"
 	"github.com/morningconsult/go-elasticsearch-alerts/command/alert"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/xerrors"
 )
 
@@ -77,6 +79,11 @@ func toJSON(obj interface{}) string {
 	return string(b)
 }
 
+func toTitle(obj interface{}) string {
+	var tag language.Tag
+	return cases.Title(tag, cases.NoLower).String(fmt.Sprintf("%s", obj))
+}
+
 // NewAlertMethod creates a new *AlertMethod or a
 // non-nil error if there was an error.
 func NewAlertMethod(config *AlertMethodConfig) (alert.Method, error) {
@@ -108,7 +115,7 @@ func NewAlertMethod(config *AlertMethodConfig) (alert.Method, error) {
 		"trimSpace":  strings.TrimSpace,
 		"toUpper":    strings.ToUpper,
 		"toLower":    strings.ToLower,
-		"toTitle":    strings.ToTitle,
+		"title":      toTitle,
 	}
 
 	return &AlertMethod{
